@@ -713,3 +713,70 @@ class StandardROIHeads(ROIHeads):
             keypoint_logits = self.keypoint_head(keypoint_features)
             keypoint_rcnn_inference(keypoint_logits, instances)
             return instances
+
+
+@ROI_HEADS_REGISTRY.register()
+class FC7ROIHeads(StandardROIHeads):
+    """
+    Essentially the same as StandardROIHeads, but includes the FC7 features for each ROI
+    """
+
+    def forward(self, images, features, proposals, targets=None):
+        """
+        See :class:`ROIHeads.forward`.
+        """
+        del images
+        if self.training:
+            proposals = self.label_and_sample_proposals(proposals, targets)
+        del targets
+
+        features_list = [features[f] for f in self.in_features]
+
+        if self.training:
+            losses, _ = self._forward_box(features_list, proposals)
+            # During training the proposals used by the box head are
+            # used by the mask, keypoint (and densepose) heads.
+            losses.update(self._forward_mask(features_list, proposals))
+            losses.update(self._forward_keypoint(features_list, proposals))
+            return proposals, losses
+        else:
+            pred_instances, fc7_features = self._forward_box(features_list, proposals)
+            # During inference cascaded prediction is used: the mask and keypoints heads are only
+            # applied to the top scoring box detections.
+            pred_instances = self.forward_with_given_boxes(features, pred_instances)
+            return pred_instances, {'fc7_features': fc7_features}
+
+    def _forward_box(self, features, proposals):
+        """
+        Forward logic of the box prediction branch.
+
+        Args:
+            features (list[Tensor]): #level input features for box prediction
+            proposals (list[Instances]): the per-image object proposals with
+                their matching ground truth.
+                Each has fields "proposal_boxes", and "objectness_logits",
+                "gt_classes", "gt_boxes".
+
+        Returns:
+            In training, a dict of losses.
+            In inference, a list of `Instances`, the predicted instances.
+            In box_features, a (list[Tensor]): #level input features after going through pooling + box_head
+        """
+        box_features = self.box_pooler(features, [x.proposal_boxes for x in proposals])
+        box_features = self.box_head(box_features)
+        pred_class_logits, pred_proposal_deltas = self.box_predictor(box_features)
+
+        outputs = FastRCNNOutputs(
+            self.box2box_transform,
+            pred_class_logits,
+            pred_proposal_deltas,
+            proposals,
+            self.smooth_l1_beta,
+        )
+        if self.training:
+            return outputs.losses()
+        else:
+            pred_instances, _ = outputs.inference(
+                self.test_score_thresh, self.test_nms_thresh, self.test_detections_per_img
+            )
+            return pred_instances, box_features
