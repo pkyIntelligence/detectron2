@@ -38,7 +38,8 @@ Naming convention:
 """
 
 
-def fast_rcnn_inference(boxes, scores, image_shapes, score_thresh, nms_thresh, topk_per_image):
+def fast_rcnn_inference(boxes, scores, image_shapes, score_thresh, nms_thresh, topk_per_image, box_features=None,
+                        pred_class_logits=None):
     """
     Call `fast_rcnn_inference_single_image` for all images.
 
@@ -57,6 +58,8 @@ def fast_rcnn_inference(boxes, scores, image_shapes, score_thresh, nms_thresh, t
         nms_thresh (float):  The threshold to use for box non-maximum suppression. Value in [0, 1].
         topk_per_image (int): The number of top scoring detections to return. Set < 0 to return
             all detections.
+        box_features (list[Tensor]): A list of Tensors of FC7 Layer output features
+        pred_class_logits (list[Tensor]): A list of Tensors of prediction class logits
 
     Returns:
         instances: (list[Instances]): A list of N instances, one for each image in the batch,
@@ -64,17 +67,27 @@ def fast_rcnn_inference(boxes, scores, image_shapes, score_thresh, nms_thresh, t
         kept_indices: (list[Tensor]): A list of 1D tensor of length of N, each element indicates
             the corresponding boxes/scores index in [0, Ri) from the input, for image i.
     """
+    num_images = len(boxes)
+
+    if box_features is None:
+        box_features = (None,) * num_images
+
+    if pred_class_logits is None:
+        pred_class_logits = (None,) * num_images
+
     result_per_image = [
         fast_rcnn_inference_single_image(
-            boxes_per_image, scores_per_image, image_shape, score_thresh, nms_thresh, topk_per_image
+            boxes_per_image, scores_per_image, image_shape, score_thresh, nms_thresh, topk_per_image,
+            box_features_per_image, pred_class_logits_per_image
         )
-        for scores_per_image, boxes_per_image, image_shape in zip(scores, boxes, image_shapes)
+        for scores_per_image, boxes_per_image, image_shape, box_features_per_image, pred_class_logits_per_image
+        in zip(scores, boxes, image_shapes, box_features, pred_class_logits)
     ]
     return tuple(list(x) for x in zip(*result_per_image))
 
 
 def fast_rcnn_inference_single_image(
-    boxes, scores, image_shape, score_thresh, nms_thresh, topk_per_image
+    boxes, scores, image_shape, score_thresh, nms_thresh, topk_per_image, box_features=None, pred_class_logits=None
 ):
     """
     Single-image inference. Return bounding-box detection results by thresholding
@@ -115,6 +128,15 @@ def fast_rcnn_inference_single_image(
     result.pred_boxes = Boxes(boxes)
     result.scores = scores
     result.pred_classes = filter_inds[:, 1]
+
+    if box_features is not None:
+        box_features = box_features[keep]
+        result.box_features = box_features
+
+    if pred_class_logits is not None:
+        pred_class_logits = pred_class_logits[keep]
+        result.pred_class_logits = pred_class_logits
+
     return result, filter_inds[:, 0]
 
 
@@ -309,6 +331,76 @@ class FastRCNNOutputs(object):
 
         return fast_rcnn_inference(
             boxes, scores, image_shapes, score_thresh, nms_thresh, topk_per_image
+        )
+
+
+class FC7Outputs(FastRCNNOutputs):
+    """
+    A class that stores information about outputs of a Fast R-CNN head.
+    """
+
+    def __init__(
+        self, box2box_transform, pred_class_logits, pred_proposal_deltas, proposals, box_features, smooth_l1_beta
+    ):
+        """
+        Args:
+            box2box_transform (Box2BoxTransform/Box2BoxTransformRotated):
+                box2box transform instance for proposal-to-detection transformations.
+            pred_class_logits (Tensor): A tensor of shape (R, K + 1) storing the predicted class
+                logits for all R predicted object instances.
+                Each row corresponds to a predicted object instance.
+            pred_proposal_deltas (Tensor): A tensor of shape (R, K * B) or (R, B) for
+                class-specific or class-agnostic regression. It stores the predicted deltas that
+                transform proposals into final box detections.
+                B is the box dimension (4 or 5).
+                When B is 4, each row is [dx, dy, dw, dh (, ....)].
+                When B is 5, each row is [dx, dy, dw, dh, da (, ....)].
+            proposals (list[Instances]): A list of N Instances, where Instances i stores the
+                proposals for image i, in the field "proposal_boxes".
+                When training, each Instances must have ground-truth labels
+                stored in the field "gt_classes" and "gt_boxes".
+            box_features: (list[Instances]): A list of N instances, the FC7 layer outputs for each instance
+            smooth_l1_beta (float): The transition point between L1 and L2 loss in
+                the smooth L1 loss function. When set to 0, the loss becomes L1. When
+                set to +inf, the loss becomes constant 0.
+        """
+        self.box2box_transform = box2box_transform
+        self.num_preds_per_image = [len(p) for p in proposals]
+        self.pred_class_logits = pred_class_logits
+        self.pred_proposal_deltas = pred_proposal_deltas
+        self.box_features = box_features
+        self.smooth_l1_beta = smooth_l1_beta
+
+        box_type = type(proposals[0].proposal_boxes)
+        # cat(..., dim=0) concatenates over all images in the batch
+        self.proposals = box_type.cat([p.proposal_boxes for p in proposals])
+        assert not self.proposals.tensor.requires_grad, "Proposals should not require gradients!"
+        self.image_shapes = [x.image_size for x in proposals]
+
+        # The following fields should exist only when training.
+        if proposals[0].has("gt_boxes"):
+            self.gt_boxes = box_type.cat([p.gt_boxes for p in proposals])
+            assert proposals[0].has("gt_classes")
+            self.gt_classes = cat([p.gt_classes for p in proposals], dim=0)
+
+    def inference(self, score_thresh, nms_thresh, topk_per_image):
+        """
+        Args:
+            score_thresh (float): same as fast_rcnn_inference.
+            nms_thresh (float): same as fast_rcnn_inference.
+            topk_per_image (int): same as fast_rcnn_inference.
+        Returns:
+            list[Instances]: same as fast_rcnn_inference.
+            list[Tensor]: same as fast_rcnn_inference.
+        """
+        boxes = self.predict_boxes()
+        scores = self.predict_probs()
+        box_features = self.box_features.split(self.num_preds_per_image, dim=0)
+        pred_class_logits = self.pred_class_logits.split(self.num_preds_per_image, dim=0)
+        image_shapes = self.image_shapes
+
+        return fast_rcnn_inference(
+            boxes, scores, image_shapes, score_thresh, nms_thresh, topk_per_image, box_features, pred_class_logits
         )
 
 

@@ -17,7 +17,7 @@ from ..poolers import ROIPooler
 from ..proposal_generator.proposal_utils import add_ground_truth_to_proposals
 from ..sampling import subsample_labels
 from .box_head import build_box_head
-from .fast_rcnn import FastRCNNOutputLayers, FastRCNNOutputs
+from .fast_rcnn import FastRCNNOutputLayers, FastRCNNOutputs, FC7Outputs
 from .keypoint_head import build_keypoint_head, keypoint_rcnn_inference, keypoint_rcnn_loss
 from .mask_head import build_mask_head, mask_rcnn_inference, mask_rcnn_loss
 
@@ -718,33 +718,15 @@ class StandardROIHeads(ROIHeads):
 @ROI_HEADS_REGISTRY.register()
 class FC7ROIHeads(StandardROIHeads):
     """
-    Essentially the same as StandardROIHeads, but includes the FC7 features for each ROI
+    It's "standard" in a sense that there is no ROI transform sharing
+    or feature sharing between tasks.
+    The cropped rois go to separate branches (boxes and masks) directly.
+    This way, it is easier to make separate abstractions for different branches.
+
+    This class is used by most models, such as FPN and C5.
+    To implement more models, you can subclass it and implement a different
+    :meth:`forward()` or a head.
     """
-
-    def forward(self, images, features, proposals, targets=None):
-        """
-        See :class:`ROIHeads.forward`.
-        """
-        del images
-        if self.training:
-            proposals = self.label_and_sample_proposals(proposals, targets)
-        del targets
-
-        features_list = [features[f] for f in self.in_features]
-
-        if self.training:
-            losses, _ = self._forward_box(features_list, proposals)
-            # During training the proposals used by the box head are
-            # used by the mask, keypoint (and densepose) heads.
-            losses.update(self._forward_mask(features_list, proposals))
-            losses.update(self._forward_keypoint(features_list, proposals))
-            return proposals, losses
-        else:
-            pred_instances, extra_outputs = self._forward_box(features_list, proposals)
-            # During inference cascaded prediction is used: the mask and keypoints heads are only
-            # applied to the top scoring box detections.
-            pred_instances = self.forward_with_given_boxes(features, pred_instances)
-            return pred_instances, extra_outputs
 
     def _forward_box(self, features, proposals):
         """
@@ -760,17 +742,17 @@ class FC7ROIHeads(StandardROIHeads):
         Returns:
             In training, a dict of losses.
             In inference, a list of `Instances`, the predicted instances.
-            In box_features, a (list[Tensor]): #level input features after going through pooling + box_head
         """
         box_features = self.box_pooler(features, [x.proposal_boxes for x in proposals])
         box_features = self.box_head(box_features)
         pred_class_logits, pred_proposal_deltas = self.box_predictor(box_features)
 
-        outputs = FastRCNNOutputs(
+        outputs = FC7Outputs(
             self.box2box_transform,
             pred_class_logits,
             pred_proposal_deltas,
             proposals,
+            box_features,
             self.smooth_l1_beta,
         )
         if self.training:
@@ -779,4 +761,4 @@ class FC7ROIHeads(StandardROIHeads):
             pred_instances, _ = outputs.inference(
                 self.test_score_thresh, self.test_nms_thresh, self.test_detections_per_img
             )
-            return pred_instances, {'fc7_features': box_features, 'class_logits': pred_class_logits}
+            return pred_instances
