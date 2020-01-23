@@ -212,8 +212,8 @@ class FC7Predictor(DefaultPredictor):
             image = torch.as_tensor(image.astype("float32").transpose(2, 0, 1))
 
             inputs = {"image": image, "height": height, "width": width}
-            predictions, fc7_features = self.model([inputs])
-            return predictions, fc7_features
+            predictions, extra_outputs = self.model([inputs])
+            return predictions, extra_outputs
 
 class DefaultTrainer(SimpleTrainer):
     """

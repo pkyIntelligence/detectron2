@@ -5,6 +5,8 @@ MODEL:
   MASK_ON: False
   RESNETS:
     DEPTH: 101
+  RPN:
+    POST_NMS_TOPK_TEST: 100
   ROI_HEADS:
     NAME: "FC7ROIHeads"
 SOLVER:

@@ -238,15 +238,15 @@ class FC7GenRCNN(GeneralizedRCNN):
                 assert "proposals" in batched_inputs[0]
                 proposals = [x["proposals"].to(self.device) for x in batched_inputs]
 
-            results, fc7_features = self.roi_heads(images, features, proposals, None)
+            results, extra_outputs = self.roi_heads(images, features, proposals, None)
         else:
             detected_instances = [x.to(self.device) for x in detected_instances]
             results = self.roi_heads.forward_with_given_boxes(features, detected_instances)
 
         if do_postprocess:
-            return super()._postprocess(results, batched_inputs, images.image_sizes), fc7_features
+            return super()._postprocess(results, batched_inputs, images.image_sizes), extra_outputs
         else:
-            return results, fc7_features
+            return results, extra_outputs
 
 
 @META_ARCH_REGISTRY.register()

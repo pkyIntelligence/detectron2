@@ -740,11 +740,11 @@ class FC7ROIHeads(StandardROIHeads):
             losses.update(self._forward_keypoint(features_list, proposals))
             return proposals, losses
         else:
-            pred_instances, fc7_features = self._forward_box(features_list, proposals)
+            pred_instances, extra_outputs = self._forward_box(features_list, proposals)
             # During inference cascaded prediction is used: the mask and keypoints heads are only
             # applied to the top scoring box detections.
             pred_instances = self.forward_with_given_boxes(features, pred_instances)
-            return pred_instances, {'fc7_features': fc7_features}
+            return pred_instances, extra_outputs
 
     def _forward_box(self, features, proposals):
         """
@@ -779,4 +779,4 @@ class FC7ROIHeads(StandardROIHeads):
             pred_instances, _ = outputs.inference(
                 self.test_score_thresh, self.test_nms_thresh, self.test_detections_per_img
             )
-            return pred_instances, box_features
+            return pred_instances, {'fc7_features': box_features, 'class_logits': pred_class_logits}
