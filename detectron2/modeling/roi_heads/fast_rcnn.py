@@ -38,8 +38,7 @@ Naming convention:
 """
 
 
-def fast_rcnn_inference(boxes, scores, image_shapes, score_thresh, nms_thresh, topk_per_image, box_features=None,
-                        pred_class_logits=None):
+def fast_rcnn_inference(boxes, scores, image_shapes, score_thresh, nms_thresh, topk_per_image, box_features=None):
     """
     Call `fast_rcnn_inference_single_image` for all images.
 
@@ -59,7 +58,6 @@ def fast_rcnn_inference(boxes, scores, image_shapes, score_thresh, nms_thresh, t
         topk_per_image (int): The number of top scoring detections to return. Set < 0 to return
             all detections.
         box_features (list[Tensor]): A list of Tensors of FC7 Layer output features
-        pred_class_logits (list[Tensor]): A list of Tensors of prediction class logits
 
     Returns:
         instances: (list[Instances]): A list of N instances, one for each image in the batch,
@@ -72,22 +70,19 @@ def fast_rcnn_inference(boxes, scores, image_shapes, score_thresh, nms_thresh, t
     if box_features is None:
         box_features = (None,) * num_images
 
-    if pred_class_logits is None:
-        pred_class_logits = (None,) * num_images
-
     result_per_image = [
         fast_rcnn_inference_single_image(
             boxes_per_image, scores_per_image, image_shape, score_thresh, nms_thresh, topk_per_image,
-            box_features_per_image, pred_class_logits_per_image
+            box_features_per_image
         )
-        for scores_per_image, boxes_per_image, image_shape, box_features_per_image, pred_class_logits_per_image
-        in zip(scores, boxes, image_shapes, box_features, pred_class_logits)
+        for scores_per_image, boxes_per_image, image_shape, box_features_per_image
+        in zip(scores, boxes, image_shapes, box_features)
     ]
     return tuple(list(x) for x in zip(*result_per_image))
 
 
 def fast_rcnn_inference_single_image(
-    boxes, scores, image_shape, score_thresh, nms_thresh, topk_per_image, box_features=None, pred_class_logits=None
+    boxes, scores, image_shape, score_thresh, nms_thresh, topk_per_image, box_features=None,
 ):
     """
     Single-image inference. Return bounding-box detection results by thresholding
@@ -100,6 +95,7 @@ def fast_rcnn_inference_single_image(
     Returns:
         Same as `fast_rcnn_inference`, but for only one image.
     """
+    probs = scores.clone().detach()
     scores = scores[:, :-1]
     num_bbox_reg_classes = boxes.shape[1] // 4
     # Convert to Boxes to use the `clip` function ...
@@ -133,9 +129,8 @@ def fast_rcnn_inference_single_image(
         box_features = box_features[keep]
         result.box_features = box_features
 
-    if pred_class_logits is not None:
-        pred_class_logits = pred_class_logits[keep]
-        result.pred_class_logits = pred_class_logits
+    probs = probs[keep]
+    result.probs = probs
 
     return result, filter_inds[:, 0]
 
@@ -396,11 +391,10 @@ class FC7Outputs(FastRCNNOutputs):
         boxes = self.predict_boxes()
         scores = self.predict_probs()
         box_features = self.box_features.split(self.num_preds_per_image, dim=0)
-        pred_class_logits = self.pred_class_logits.split(self.num_preds_per_image, dim=0)
         image_shapes = self.image_shapes
 
         return fast_rcnn_inference(
-            boxes, scores, image_shapes, score_thresh, nms_thresh, topk_per_image, box_features, pred_class_logits
+            boxes, scores, image_shapes, score_thresh, nms_thresh, topk_per_image, box_features
         )
 
 
