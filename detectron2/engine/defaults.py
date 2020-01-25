@@ -42,7 +42,7 @@ from detectron2.utils.logger import setup_logger
 from . import hooks
 from .train_loop import SimpleTrainer
 
-__all__ = ["default_argument_parser", "default_setup", "DefaultPredictor", "DefaultTrainer"]
+__all__ = ["default_argument_parser", "default_setup", "DefaultPredictor", "DefaultMultiImgPredictor", "DefaultTrainer"]
 
 
 def default_argument_parser():
@@ -188,6 +188,31 @@ class DefaultPredictor:
             inputs = {"image": image, "height": height, "width": width}
             predictions = self.model([inputs])[0]
             return predictions
+
+
+class DefaultMultiImgPredictor(DefaultPredictor):
+    def __call__(self, imgs):
+        """
+        Args:
+            imgs: list(np.ndarray): each an image of shape (H, W, C) (in BGR order).
+
+        Returns:
+            predictions list(dict): the output of the model
+        """
+        with torch.no_grad():  # https://github.com/sphinx-doc/sphinx/issues/4258
+            inputs = []
+            for original_image in imgs:
+                # Apply pre-processing to image.
+                if self.input_format == "RGB":
+                    # whether the model expects BGR inputs or RGB
+                    original_image = original_image[:, :, ::-1]
+                height, width = original_image.shape[:2]
+                image = self.transform_gen.get_transform(original_image).apply_image(original_image)
+                image = torch.as_tensor(image.astype("float32").transpose(2, 0, 1))
+
+                inputs.append({"image": image, "height": height, "width": width})
+
+            return self.model(inputs)
 
 
 class DefaultTrainer(SimpleTrainer):
