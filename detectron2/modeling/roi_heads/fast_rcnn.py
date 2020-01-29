@@ -126,10 +126,10 @@ def fast_rcnn_inference_single_image(
     result.pred_classes = filter_inds[:, 1]
 
     if box_features is not None:
-        box_features = box_features[keep]
+        box_features = box_features[filter_inds[:, 0]]
         result.box_features = box_features
 
-    probs = probs[keep]
+    probs = probs[filter_inds[:, 0]]
     result.probs = probs
 
     return result, filter_inds[:, 0]
