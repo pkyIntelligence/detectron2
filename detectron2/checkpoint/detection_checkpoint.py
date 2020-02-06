@@ -1,5 +1,8 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+import torch
+import numpy as np
 import pickle
+
 from fvcore.common.checkpoint import Checkpointer
 from fvcore.common.file_io import PathManager
 
@@ -43,6 +46,26 @@ class DetectionCheckpointer(Checkpointer):
         if "model" not in loaded:
             loaded = {"model": loaded}
         return loaded
+
+    def _convert_ndarray_to_tensor(self, state_dict: dict):
+        """
+        In-place convert all numpy arrays in the state_dict to torch tensor,
+        skips non-weights information and delete it instead
+        Args:
+            state_dict (dict): a state-dict to be loaded to the model.
+        """
+        # model could be an OrderedDict with _metadata attribute
+        # (as returned by Pytorch's state_dict()). We should preserve these
+        # properties.
+        for k in list(state_dict.keys()):
+            v = state_dict[k]
+            if not isinstance(v, np.ndarray) and not isinstance(
+                v, torch.Tensor
+            ):
+                del state_dict[k]
+                continue
+            if not isinstance(v, torch.Tensor):
+                state_dict[k] = torch.from_numpy(v)
 
     def _load_model(self, checkpoint):
         if checkpoint.get("matching_heuristics", False):
