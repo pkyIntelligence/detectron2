@@ -38,7 +38,7 @@ Naming convention:
 """
 
 
-def fast_rcnn_inference(boxes, scores, image_shapes, score_thresh, nms_thresh, topk_per_image, box_features=None):
+def fast_rcnn_inference(boxes, scores, image_shapes, score_thresh, nms_thresh, topk_per_image, fc_box_features=None):
     """
     Call `fast_rcnn_inference_single_image` for all images.
 
@@ -57,7 +57,10 @@ def fast_rcnn_inference(boxes, scores, image_shapes, score_thresh, nms_thresh, t
         nms_thresh (float):  The threshold to use for box non-maximum suppression. Value in [0, 1].
         topk_per_image (int): The number of top scoring detections to return. Set < 0 to return
             all detections.
-        box_features (list[Tensor]): A list of Tensors of FC7 Layer output features
+        fc_box_features (list[list[Tensor]]): A list of of a list of Tensors of fully connected layer features,
+            outer index = fully connected layer index i.e. fc_box_features[0] refers to the first fully connected layer
+                outputs, fc_box_features[-1] refers to the last fully connected layer outputs.
+            inner index = region index, the feature outputs for a particular region on the image
 
     Returns:
         instances: (list[Instances]): A list of N instances, one for each image in the batch,
@@ -67,22 +70,24 @@ def fast_rcnn_inference(boxes, scores, image_shapes, score_thresh, nms_thresh, t
     """
     num_images = len(boxes)
 
-    if box_features is None:
-        box_features = (None,) * num_images
+    if fc_box_features is None:
+        fc_box_features = (None,) * num_images
+    else:
+        fc_box_features = list(zip(*fc_box_features))  # Transpose outer and inner index
 
     result_per_image = [
         fast_rcnn_inference_single_image(
             boxes_per_image, scores_per_image, image_shape, score_thresh, nms_thresh, topk_per_image,
-            box_features_per_image
+            fc_box_features_per_image
         )
-        for scores_per_image, boxes_per_image, image_shape, box_features_per_image
-        in zip(scores, boxes, image_shapes, box_features)
+        for scores_per_image, boxes_per_image, image_shape, fc_box_features_per_image
+        in zip(scores, boxes, image_shapes, fc_box_features)
     ]
     return tuple(list(x) for x in zip(*result_per_image))
 
 
 def fast_rcnn_inference_single_image(
-    boxes, scores, image_shape, score_thresh, nms_thresh, topk_per_image, box_features=None,
+    boxes, scores, image_shape, score_thresh, nms_thresh, topk_per_image, fc_box_features=None,
 ):
     """
     Single-image inference. Return bounding-box detection results by thresholding
@@ -125,9 +130,12 @@ def fast_rcnn_inference_single_image(
     result.scores = scores
     result.pred_classes = filter_inds[:, 1]
 
-    if box_features is not None:
-        box_features = box_features[filter_inds[:, 0]]
-        result.box_features = box_features
+    # Compact all fc layers into a single tensor to work nicely with Instance class for now
+    if fc_box_features is not None:
+        fc_box_features = [fc_layer_box_features[filter_inds[:, 0]] for fc_layer_box_features in fc_box_features]
+        # will need to know number of layers and dimensions to unpack
+        fc_box_features = torch.cat(fc_box_features, dim=1)
+        result.fc_box_features = fc_box_features
 
     probs = probs[filter_inds[:, 0]]
     result.probs = probs
@@ -329,13 +337,13 @@ class FastRCNNOutputs(object):
         )
 
 
-class FC7Outputs(FastRCNNOutputs):
+class FCOutputs(FastRCNNOutputs):
     """
     A class that stores information about outputs of a Fast R-CNN head.
     """
 
     def __init__(
-        self, box2box_transform, pred_class_logits, pred_proposal_deltas, proposals, box_features, smooth_l1_beta
+        self, box2box_transform, pred_class_logits, pred_proposal_deltas, proposals, fc_box_features, smooth_l1_beta
     ):
         """
         Args:
@@ -363,7 +371,7 @@ class FC7Outputs(FastRCNNOutputs):
         self.num_preds_per_image = [len(p) for p in proposals]
         self.pred_class_logits = pred_class_logits
         self.pred_proposal_deltas = pred_proposal_deltas
-        self.box_features = box_features
+        self.fc_box_features = fc_box_features
         self.smooth_l1_beta = smooth_l1_beta
 
         box_type = type(proposals[0].proposal_boxes)
@@ -390,11 +398,11 @@ class FC7Outputs(FastRCNNOutputs):
         """
         boxes = self.predict_boxes()
         scores = self.predict_probs()
-        box_features = self.box_features.split(self.num_preds_per_image, dim=0)
+        fc_box_features = [fc_layer_features.split(self.num_preds_per_image, dim=0) for fc_layer_features in self.fc_box_features]
         image_shapes = self.image_shapes
 
         return fast_rcnn_inference(
-            boxes, scores, image_shapes, score_thresh, nms_thresh, topk_per_image, box_features
+            boxes, scores, image_shapes, score_thresh, nms_thresh, topk_per_image, fc_box_features
         )
 
 

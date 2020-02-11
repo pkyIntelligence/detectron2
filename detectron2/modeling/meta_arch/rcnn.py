@@ -14,7 +14,7 @@ from ..proposal_generator import build_proposal_generator
 from ..roi_heads import build_roi_heads
 from .build import META_ARCH_REGISTRY
 
-__all__ = ["GeneralizedRCNN", "ProposalNetwork"]
+__all__ = ["GeneralizedRCNN", "DetectronVLPFasterRCNN", "ProposalNetwork"]
 
 
 @META_ARCH_REGISTRY.register()
@@ -200,6 +200,23 @@ class GeneralizedRCNN(nn.Module):
             r = detector_postprocess(results_per_image, height, width)
             processed_results.append({"instances": r})
         return processed_results
+
+
+@META_ARCH_REGISTRY.register()
+class DetectronVLPFasterRCNN(GeneralizedRCNN):
+    """
+    Generalized R-CNN. Any models that contains the following three components:
+    1. Per-image feature extraction (aka backbone)
+    2. Region proposal generation
+    3. Per-region feature extraction and prediction
+    """
+
+    def __init__(self, cfg):
+        super().__init__(cfg)
+
+        num_channels = len(cfg.MODEL.PIXEL_MEAN)
+        pixel_mean = torch.Tensor(cfg.MODEL.PIXEL_MEAN).to(self.device).view(num_channels, 1, 1)
+        self.normalizer = lambda x: (x - pixel_mean)
 
 
 @META_ARCH_REGISTRY.register()

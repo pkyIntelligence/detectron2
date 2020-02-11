@@ -17,7 +17,7 @@ from ..poolers import ROIPooler
 from ..proposal_generator.proposal_utils import add_ground_truth_to_proposals
 from ..sampling import subsample_labels
 from .box_head import build_box_head
-from .fast_rcnn import FastRCNNOutputLayers, FastRCNNOutputs, FC7Outputs
+from .fast_rcnn import FastRCNNOutputLayers, FastRCNNOutputs, FCOutputs
 from .keypoint_head import build_keypoint_head, keypoint_rcnn_inference, keypoint_rcnn_loss
 from .mask_head import build_mask_head, mask_rcnn_inference, mask_rcnn_loss
 
@@ -716,7 +716,7 @@ class StandardROIHeads(ROIHeads):
 
 
 @ROI_HEADS_REGISTRY.register()
-class FC7ROIHeads(StandardROIHeads):
+class ExposedFCROIHeads(StandardROIHeads):
     """
     It's "standard" in a sense that there is no ROI transform sharing
     or feature sharing between tasks.
@@ -744,15 +744,15 @@ class FC7ROIHeads(StandardROIHeads):
             In inference, a list of `Instances`, the predicted instances.
         """
         box_features = self.box_pooler(features, [x.proposal_boxes for x in proposals])
-        box_features = self.box_head(box_features)
-        pred_class_logits, pred_proposal_deltas = self.box_predictor(box_features)
+        fc_box_features = self.box_head(box_features)
+        pred_class_logits, pred_proposal_deltas = self.box_predictor(fc_box_features[-1])
 
-        outputs = FC7Outputs(
+        outputs = FCOutputs(
             self.box2box_transform,
             pred_class_logits,
             pred_proposal_deltas,
             proposals,
-            box_features,
+            fc_box_features,
             self.smooth_l1_beta,
         )
         if self.training:
