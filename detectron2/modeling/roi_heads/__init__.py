@@ -7,7 +7,7 @@ from .roi_heads import (
     ROIHeads,
     Res5ROIHeads,
     StandardROIHeads,
-    FC7ROIHeads,
+    ExposedFCROIHeads,
     build_roi_heads,
     select_foreground_proposals,
 )

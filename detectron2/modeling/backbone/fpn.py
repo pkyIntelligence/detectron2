@@ -125,6 +125,7 @@ class FPN(Backbone):
         results = []
         prev_features = self.lateral_convs[0](x[0])
         results.append(self.output_convs[0](prev_features))
+
         for features, lateral_conv, output_conv in zip(
             x[1:], self.lateral_convs[1:], self.output_convs[1:]
         ):

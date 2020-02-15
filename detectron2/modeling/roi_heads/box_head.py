@@ -85,6 +85,26 @@ class FastRCNNConvFCHead(nn.Module):
         return self._output_size
 
 
+@ROI_BOX_HEAD_REGISTRY.register()
+class ExposedFastRCNNConvFCHead(FastRCNNConvFCHead):
+    """
+    A head with several 3x3 conv layers (each followed by norm & relu) and
+    several fc layers (each followed by relu).
+    Exposes the fc layers on the forward pass
+    """
+    def forward(self, x):
+        features = []
+        for layer in self.conv_norm_relus:
+            x = layer(x)
+        if len(self.fcs):
+            if x.dim() > 2:
+                x = torch.flatten(x, start_dim=1)
+            for layer in self.fcs:
+                x = F.relu(layer(x))
+                features.append(x)
+        return features
+
+
 def build_box_head(cfg, input_shape):
     """
     Build a box head defined by `cfg.MODEL.ROI_BOX_HEAD.NAME`.

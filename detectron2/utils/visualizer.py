@@ -18,7 +18,7 @@ from .colormap import random_color
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ColorMode", "VisImage", "Visualizer"]
+__all__ = ["ColorMode", "VisImage", "Visualizer", "SimpleVisualizer"]
 
 
 _SMALL_OBJECT_AREA_THRESH = 1000
@@ -1122,4 +1122,69 @@ class Visualizer:
             output (VisImage): the image output containing the visualizations added
             to the image.
         """
+        return self.output
+
+class SimpleVisualizer(Visualizer):
+    def __init__(self, img_rgb, metadata, class_names, scale=1.0, instance_mode=ColorMode.IMAGE):
+        """
+        Allows passing of class names
+        Args:
+            img_rgb: a numpy array of shape (H, W, C), where H and W correspond to
+                the height and width of the image respectively. C is the number of
+                color channels. The image is required to be in RGB format since that
+                is a requirement of the Matplotlib library. The image is also expected
+                to be in the range [0, 255].
+            metadata (MetadataCatalog): image metadata.
+        """
+        super().__init__(img_rgb, metadata, scale, instance_mode)
+        self.class_names = class_names
+
+    def draw_instance_predictions(self, predictions):
+        """
+        Draw instance-level prediction results on an image.
+
+        Args:
+            predictions (Instances): the output of an instance detection/segmentation
+                model. Following fields will be used to draw:
+                "pred_boxes", "pred_classes", "scores", "pred_masks" (or "pred_masks_rle").
+
+        Returns:
+            output (VisImage): image object with visualizations.
+        """
+        boxes = predictions.pred_boxes if predictions.has("pred_boxes") else None
+        scores = predictions.scores if predictions.has("scores") else None
+        classes = predictions.pred_classes if predictions.has("pred_classes") else None
+        labels = _create_text_labels(classes, scores, self.class_names)
+        keypoints = predictions.pred_keypoints if predictions.has("pred_keypoints") else None
+
+        if predictions.has("pred_masks"):
+            masks = np.asarray(predictions.pred_masks)
+            masks = [GenericMask(x, self.output.height, self.output.width) for x in masks]
+        else:
+            masks = None
+
+        if self._instance_mode == ColorMode.SEGMENTATION and self.metadata.get("thing_colors"):
+            colors = [
+                self._jitter([x / 255 for x in self.metadata.thing_colors[c]]) for c in classes
+            ]
+            alpha = 0.8
+        else:
+            colors = None
+            alpha = 0.5
+
+        if self._instance_mode == ColorMode.IMAGE_BW:
+            assert predictions.has("pred_masks"), "ColorMode.IMAGE_BW requires segmentations"
+            self.output.img = self._create_grayscale_image(
+                (predictions.pred_masks.any(dim=0) > 0).numpy()
+            )
+            alpha = 0.3
+
+        self.overlay_instances(
+            masks=masks,
+            boxes=boxes,
+            labels=labels,
+            keypoints=keypoints,
+            assigned_colors=colors,
+            alpha=alpha,
+        )
         return self.output
