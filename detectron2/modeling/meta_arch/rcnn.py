@@ -158,7 +158,6 @@ class GeneralizedRCNN(nn.Module):
 
         images = self.preprocess_image(batched_inputs)
         features = self.backbone(images.tensor)
-
         if detected_instances is None:
             if self.proposal_generator:
                 proposals, _ = self.proposal_generator(images, features, None)
@@ -214,9 +213,8 @@ class DetectronVLPFasterRCNN(GeneralizedRCNN):
     def __init__(self, cfg):
         super().__init__(cfg)
 
-        num_channels = len(cfg.MODEL.PIXEL_MEAN)
-        pixel_mean = torch.Tensor(cfg.MODEL.PIXEL_MEAN).to(self.device).view(num_channels, 1, 1)
-        self.normalizer = lambda x: (x - pixel_mean)
+        # Normalized in preprocessing
+        self.normalizer = lambda x: x
 
 
 @META_ARCH_REGISTRY.register()

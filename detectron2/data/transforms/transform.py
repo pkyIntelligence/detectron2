@@ -5,8 +5,9 @@
 import numpy as np
 from fvcore.transforms.transform import HFlipTransform, NoOpTransform, Transform
 from PIL import Image
+import cv2
 
-__all__ = ["ExtentTransform", "ResizeTransform"]
+__all__ = ["ExtentTransform", "ResizeTransform", "OpenCVResizeTransform"]
 
 
 class ExtentTransform(Transform):
@@ -91,6 +92,39 @@ class ResizeTransform(Transform):
 
     def apply_segmentation(self, segmentation):
         segmentation = self.apply_image(segmentation, interp=Image.NEAREST)
+        return segmentation
+
+
+class OpenCVResizeTransform(ResizeTransform):
+    """
+        Resize the image to a target size.
+        """
+
+    def __init__(self, h, w, scale, interp):
+        """
+        Args:
+            h, w (int): original image size
+            new_h, new_w (int): new image size
+            interp: OpenCV interpolation methods
+        """
+        # TODO decide on PIL vs opencv
+        super().__init__(h, w, h*scale, w*scale, interp)
+        self._set_attributes(locals())
+
+    def apply_image(self, img, interp=None):
+        assert img.shape[:2] == (self.h, self.w)
+
+        interp_method = interp if interp is not None else cv2.INTER_LINEAR
+
+        img = cv2.resize(img, None, None,
+                         fx=self.scale,
+                         fy=self.scale,
+                         interpolation=interp_method)
+
+        return img
+
+    def apply_segmentation(self, segmentation):
+        segmentation = self.apply_image(segmentation, interp=cv2.INTER_LINEAR)
         return segmentation
 
 

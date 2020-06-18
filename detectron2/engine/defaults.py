@@ -11,6 +11,7 @@ since they are meant to represent the "common default behavior" people need in t
 
 import argparse
 import logging
+import numpy as np
 import os
 from collections import OrderedDict
 import torch
@@ -191,6 +192,24 @@ class DefaultPredictor:
 
 
 class DefaultMultiImgPredictor(DefaultPredictor):
+    def __init__(self, cfg):
+        self.cfg = cfg.clone()  # cfg can be modified by model
+        self.model = build_model(self.cfg)
+        self.model.eval()
+        self.metadata = MetadataCatalog.get(cfg.DATASETS.TEST[0])
+
+        checkpointer = DetectionCheckpointer(self.model)
+        checkpointer.load(cfg.MODEL.WEIGHTS)
+
+        self.pixel_means = np.expand_dims(np.expand_dims(cfg.MODEL.PIXEL_MEAN, axis=0), axis=0)
+        self.normalizer = lambda x: (x - self.pixel_means).astype(np.float32)
+        self.transform_gen = T.OpenCVResizeShortestEdge(
+            [cfg.INPUT.MIN_SIZE_TEST, cfg.INPUT.MIN_SIZE_TEST], cfg.INPUT.MAX_SIZE_TEST
+        )
+
+        self.input_format = cfg.INPUT.FORMAT
+        assert self.input_format in ["RGB", "BGR"], self.input_format
+
     def __call__(self, imgs):
         """
         Args:
@@ -207,6 +226,10 @@ class DefaultMultiImgPredictor(DefaultPredictor):
                     # whether the model expects BGR inputs or RGB
                     original_image = original_image[:, :, ::-1]
                 height, width = original_image.shape[:2]
+
+                original_image = original_image.astype(np.float32, copy=False)
+                original_image = self.normalizer(original_image)
+
                 image = self.transform_gen.get_transform(original_image).apply_image(original_image)
                 image = torch.as_tensor(image.astype("float32").transpose(2, 0, 1))
 
