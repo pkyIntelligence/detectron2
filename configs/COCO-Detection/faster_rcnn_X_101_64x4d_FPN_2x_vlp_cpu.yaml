@@ -1,6 +1,5 @@
 _BASE_: "../Base-RCNN-FPN.yaml"
 MODEL:
-  DEVICE: "cpu"
   META_ARCHITECTURE: "DetectronVLPFasterRCNN"
   MASK_ON: False
   WEIGHTS: "model_weights/e2e_faster_rcnn_X-101-64x4d-FPN_2x-vlp.pkl"
