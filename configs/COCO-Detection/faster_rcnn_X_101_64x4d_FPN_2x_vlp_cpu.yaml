@@ -1,0 +1,31 @@
+_BASE_: "../Base-RCNN-FPN.yaml"
+MODEL:
+  DEVICE: "cpu"
+  META_ARCHITECTURE: "DetectronVLPFasterRCNN"
+  MASK_ON: False
+  WEIGHTS: "model_weights/e2e_faster_rcnn_X-101-64x4d-FPN_2x-vlp.pkl"
+  PIXEL_MEAN: [102.9801, 115.9465, 122.7717]
+  PIXEL_STD: [57.375, 57.120, 58.395]
+  RESNETS:
+    STRIDE_IN_1X1: False  # this is a C2 model
+    NUM_GROUPS: 64
+    WIDTH_PER_GROUP: 4
+    DEPTH: 101
+  FPN:
+    OUT_CHANNELS: 512
+  RPN:
+    PRE_NMS_TOPK_TRAIN: 2000
+    PRE_NMS_TOPK_TEST: 1000
+#    BATCH_SIZE_PER_IMAGE: 512, not sure which BATCH_SIZE_PER_IM refers to in the original configuration
+  ROI_HEADS:
+    NAME: "ExposedFCROIHeads"
+    NUM_CLASSES: 1600
+  ROI_BOX_HEAD:
+    NAME: "ExposedFastRCNNConvFCHead"
+    POOLER_RESOLUTION: 7
+    POOLER_SAMPLING_RATIO: 2
+    NUM_FC: 2
+    FC_DIM: 2048
+SOLVER:
+  STEPS: (210000, 250000)
+  MAX_ITER: 270000
